@@ -1,0 +1,98 @@
+---
+title: "lab05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+acc <- read.csv("https://raw.githubusercontent.com/xdaiISU/ds202materials/master/hwlabs/fars2017/accident.csv", stringsAsFactors = FALSE)
+person <- read.csv("https://raw.githubusercontent.com/xdaiISU/ds202materials/master/hwlabs/fars2017/person.csv", stringsAsFactors = FALSE)
+makecodes <- read.csv("C:/Users/siva_/OneDrive/Desktop/makeCodes.csv");
+statecodes <- read.csv("C:/Users/siva_/OneDrive/Desktop/stateCodes.csv");
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(readxl)
+library(sf)
+library(maps)
+library(tidyverse)
+acc_by_day <- acc %>% group_by(DAY_WEEK) %>% summarize(numAccidents = n())
+p <- ggplot(data = acc_by_day, aes(x = DAY_WEEK, y = numAccidents)) 
+  p <- p + xlab("Day of the week")  
+  p <- p + ylab("Number of accidents")
+  p <- p + geom_bar(stat = "identity")
+  show(p)
+```
+The highest amount of accidents happen on days 6 and 7, or Saturday and Sunday. Another notable day is Monday, while the rest of the weekdays have about the same number of accidents.
+
+```{r}
+fatalAccidentsPersons <- person %>% filter(person$INJ_SEV == '4')
+fatalAccidentsPersons
+```
+The above data frame contains the persons who are fatally hurt in accidents.
+```{r}
+mostDangerous <- fatalAccidentsPersons %>% filter(!is.na(MAKE)) %>% group_by(STATE, MAKE) %>% summarize(sumPersons = n()) %>% top_n(1)
+```
+The above data frame contains the most dangerous vehicle make in each state.
+
+```{r}
+library(usmap)
+states <- map_data("state")
+mddetails <- mostDangerous %>% left_join(statecodes,by=c("STATE" = "Codes"))
+mddetails <- mddetails %>% left_join(makecodes,by=c("MAKE" = "Codes"))
+mddetails <- mddetails %>% left_join(states,by=c("STATE"="group"))
+mddetails <- mddetails %>% mutate(avglat=(1/2)*(min(lat)+ max(lat)),avglong=(1/2)*(min(long)+max(long)))
+ggplot(states, aes(x=long, y=lat)) +   geom_path(aes(group=group)) +
+  geom_text(data=mddetails,aes(x=avglong,y=avglat,label=Make),hjust=1, vjust=1,size=3) +
+  coord_map(xlim=c(-125, -65), ylim=c(25, 50))
+
+```
+The most dangerous vehicle is whichever make has the most fatalities in a given state. What I found from the map was that Chevrolet and Ford are the most dangerous vehicle makes across the nation.
+```{r}
+perssub <- person %>% select(ST_CASE,SEX) %>% filter(SEX == 1 | SEX == 2)
+accsub <- acc %>% select(ST_CASE,DAY_WEEK,HOUR)
+accpers <- accsub %>% inner_join(perssub,by=c("ST_CASE" = "ST_CASE"))
+accpers <- accpers %>% group_by(DAY_WEEK,HOUR,SEX) %>% mutate(numAccident=n()) %>% distinct(DAY_WEEK,HOUR,SEX,numAccident)
+ggplot(data = accpers, aes(x = factor(HOUR), y = numAccident,color=factor(SEX)) ) +
+geom_bar(stat='identity') + xlab("HOUR") + ylab("Number of accidents") +
+ facet_wrap(~DAY_WEEK,ncol = 2)
+```
+The above diagram shows the number of accidents by sex and day of the week.The accidents tend to be either earlier or later in the day, which might be due to people being in a rush to get to/from work.
+```{r}
+library(choroplethr)
+library(choroplethrMaps)
+county <- map_data("county")
+#data("county.regions")
+deathsByCounty <- acc %>% inner_join(fatalAccidentsPersons,by=c("ST_CASE" = "ST_CASE"))  %>% select(STATE.x,COUNTY.x)
+deathsByCounty <- deathsByCounty %>% mutate(region=STATE.x*1000 + COUNTY.x)
+Alldata <- deathsByCounty %>% left_join((county.regions),by=c("region"="region"))
+Alldata1 <- Alldata %>% group_by(region) %>% mutate(value=n()) %>% select(region,value) %>% distinct(region,value)
+Alldata1$region = as.numeric(Alldata1$region)
+county_choropleth(Alldata1)
+```
+The diagram above is a choropleth map showing the amounts of deaths at a county level.
+
+
+```{r}
+#str(acc)
+accsub <- acc %>% select(STATE,MONTH)
+accsub1 <- accsub %>% mutate(summer=( ifelse(accsub$MONTH == 5 |accsub$MONTH == 6  | accsub$MONTH == 7 ,  0, 1)))
+accsub1 <- accsub1 %>% mutate(winter=( ifelse(accsub$MONTH == 1 |accsub$MONTH == 2  | accsub$MONTH == 12 ,  1, 0)))
+accsub2 <- accsub1 %>% group_by(STATE) %>% mutate(avgsummer=round(sum(summer)/3,1),avgwinter=round(sum(winter)/3,1)) %>% select(STATE,avgsummer,avgwinter) %>% distinct(STATE,avgsummer,avgwinter)
+accsub2 <- accsub2 %>% mutate(value=avgwinter - avgsummer)
+accsub2 <- accsub2 %>% left_join(statecodes,by=c("STATE"="Codes"))
+accsub2 <- accsub2 %>% mutate(region=tolower(State))
+state_choropleth(accsub2,                  title  = "Winter Over Summer", 
+                 legend = "Accident Averages")
+
+#accsub$summer <- if(accsub$MONTH == 1)  '0' else '1'
+```
+The map above shows the difference of accident averages between winter and summer months in 2017. Winter is defined as December, January, and February. Summer is defined as May, June, and July. The map shows that there tends to be more accidents in the summer across the country. The difference in the number of accidents can vary between states. For example, Wyoming, Vermont, New Hampshire, and Alaska all have relatively equal amounts of summer accidents compared to winter accidents. 
+
+
+
